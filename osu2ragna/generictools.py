@@ -8,7 +8,8 @@ from typing import (Callable, Collection, DefaultDict, Dict, Generator,
 GT = TypeVar('GT')
 
 
-def identity(v: GT) -> GT: return v
+def identity(v: GT) -> GT:
+    return v
 
 
 def _flatten(iie: Iterable[Iterable[GT]]) -> Generator[GT, None, None]:
@@ -37,20 +38,20 @@ class IntSpanDict(Generic[GT]):
                  *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.events: Dict[int, List[GT]
-                          ] = events if events is not None else dict()
+                          ] = events if events is not None else {}
         self.spans: List[Tuple[Tuple[int, int], GT]
-                         ] = spans if spans is not None else list()
+                         ] = spans if spans is not None else []
 
     def _filter_span_from_point_generator(self, point: int) -> Generator[GT, None, None]:
         yield from []
         for span, value in self.spans:
-            if span[0] <= point and point <= span[1]:
+            if span[0] <= point <= span[1]:
                 yield value
 
     def _filter_event_from_span_generator(self, span: Tuple[int, int]) -> Generator[GT, None, None]:
         yield from []
         for point, values in self.events.items():
-            if span[0] <= point and point <= span[1]:
+            if span[0] <= point <= span[1]:
                 yield from values
 
     def _filter_span_from_span_generator(self, span_request: Tuple[int, int]) -> Generator[GT, None, None]:
@@ -67,14 +68,14 @@ class IntSpanDict(Generic[GT]):
 
     def append_point(self, point: int, value: GT):
         if point not in self.events:
-            self.events[point] = list()
+            self.events[point] = []
         self.events[point].append(value)
 
     def append_span(self, span: Tuple[int, int], value: GT):
         self.spans.append((span, value))
 
     def active_at_point(self, point: int) -> List[GT]:
-        return (self.events.get(point, list()) +
+        return (self.events.get(point, []) +
                 list(self._filter_span_from_point_generator(point)))
 
     def active_at_span(self, span: Tuple[int, int]) -> List[GT]:
@@ -84,7 +85,7 @@ class IntSpanDict(Generic[GT]):
     def points_of_interest(self) -> List[int]:
         return sorted(
             set(self.events.keys()) |
-            set(_flatten(next(zip(*self.spans), list())))
+            set(_flatten(next(zip(*self.spans), [])))
         )
 
     def map_keys(self, mapper: Callable[[int], int]) -> 'IntSpanDict[GT]':
@@ -128,7 +129,7 @@ def distance_of_incresing_values(values: List[int]) -> List[int]:
 
 def linear_clusterization(points: List[GT], eps=1) -> List[List[GT]]:
     if len(points) == 0:
-        return list()
+        return []
     points_sorted = sorted(points)  # type: ignore
     clusters = [[points_sorted[0]]]
     for point in points_sorted[1:]:
@@ -140,10 +141,22 @@ def linear_clusterization(points: List[GT], eps=1) -> List[List[GT]]:
 
 def pick_the_largest_sublist(lle: List[List[GT]]) -> List[GT]:
     if len(lle) == 0:
-        return list()
+        return []
     s = max(map(len, lle))
     return next(filter(lambda a: len(a) == s, lle))
 
 
 def avg(e: Collection[Union[float, int]]) -> float:
     return sum(e)/len(e)
+
+
+def is_ascii_alnum(c: str) -> bool:
+    return (
+        (ord('0') <= ord(c) <= ord('9')) or
+        (ord('A') <= ord(c) <= ord('Z')) or
+        (ord('a') <= ord(c) <= ord('z'))
+    )
+
+
+def filter_ascii_alnum(s: str) -> str:
+    return ''.join(filter(is_ascii_alnum, s))

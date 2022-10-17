@@ -1,9 +1,9 @@
-# osu2saber
+# osu2ragna
 
-Convert beatmaps from the `Songs` folder from osu! into `CustomLevels` folder from Beat Saber.
+Convert beatmaps from the `Songs` folder from osu! into `CustomLevels` folder of RagnaRock.
 
 ## Playability
-Expect unnatural movements from mouse and tablet (a direct and often exagerated translation from osu motions) and note overload (mostly dot boxes) on BSaber.
+Surprisingly good. There are no hold notes, but the three 1.5\*~2.2\* maps plays like 6~8 hammers.
 
 ## Requirements
  - Python
@@ -12,16 +12,20 @@ Expect unnatural movements from mouse and tablet (a direct and often exagerated 
 
 ## Usage
 ### Single beatmap
-`python -m osu2saber <BEATMAPSET_FOLDER> <CUSTOMLEVELS_FOLDER>`
+`python -m osu2ragna <BEATMAPSET_FOLDER> <CUSTOMLEVELS_FOLDER>`
 
 e.g.:
 
-`python -m osu2saber ~/".osu/Songs/1040733 LukHash - SOCIAL PHOBIA" ~/".local/share/Steam/steamapps/common/Beat Saber/Beat Saber_Data/CustomLevels"`
+`python -m osu2ragna D:\osu\Songs\"511480 t+pazolite - Oshama Scramble!" %USERPROFILE%\Documents\Ragnarock\CustomSongs`
+
+`python -m osu2ragna D:\osu\Songs\"511480 t+pazolite - Oshama Scramble!" $Env:USERPROFILE\Documents\Ragnarock\CustomSongs`
 
 ### All beatmaps
-`python -m osu2saber --songs <OSU_SONGS_FOLDER> <CUSTOMLEVELS_FOLDER>`
+`python -m osu2ragna --songs <OSU_SONGS_FOLDER> <CUSTOMLEVELS_FOLDER>`
 
 e.g.:
 
-`python -m osu2saber --songs ~/.osu/Songs ~/".local/share/Steam/steamapps/common/Beat Saber/Beat Saber_Data/CustomLevels"`
+`python -m osu2ragna --songs D:\osu\Songs %USERPROFILE%\Documents\Ragnarock\CustomSongs`
+
+`python -m osu2ragna --songs D:\osu\Songs $Env:USERPROFILE\Documents\Ragnarock\CustomSongs`
 
