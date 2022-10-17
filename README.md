@@ -3,7 +3,7 @@
 Convert beatmaps from the `Songs` folder from osu! into `CustomLevels` folder of RagnaRock.
 
 ## Playability
-Surprisingly good. There are no hold notes, but the three 1.5\*~2.2\* maps plays like 6~8 hammers.
+Surprisingly good. There are no hold notes, but the three 1.5\*\~2.2\* maps plays like 6\~8 hammers.
 
 ## Requirements
  - Python
