@@ -105,6 +105,12 @@ def convert_osu2ragna(beatmapset_osu: Path,
     # filter out non-mania4k
     osu_beatsets = [obs for obs in osu_beatsets if obs[0].mode ==
                     OsuModesEnum.Mania and obs[0].circle_size == 4]
+    if osu_beatsets is None or len(osu_beatsets) <= 0:
+        for x in beatmapset_ragna_numbered.glob('*'):
+            x.unlink()
+            del x
+        beatmapset_ragna_numbered.rmdir()
+        return True
     # Abort on known failures [yes, again]
     if osu_beatsets is None:
         return True
@@ -290,7 +296,7 @@ def read_beats_osu(beatmapset_osu: Path, beatmapset_ragna: Path, osu_beatmap_pat
         metadata.beatmap_set_id = metadata.beatmap_set_id or osu_beatmapset_id_default
         osu_hit_objects = get_osu_hit_objects_from_section(
             osu_beatmap_sections)
-        if len(osu_hit_objects) > 0 and metadata.mode != OsuModesEnum.Taiko:
+        if len(osu_hit_objects) > 0 and metadata.mode == OsuModesEnum.Mania and metadata.circle_size == 4:
             print(f'  |> {metadata.mode.name} ~ {osu_beatmap_path.stem}')
             ragna_beatmap_audio = beatmapset_ragna.joinpath('song.egg')
             if convert_audio_osu2ragna(beatmapset_osu, ragna_beatmap_audio, osu_beatmap_sections):
