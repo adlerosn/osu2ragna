@@ -6,36 +6,82 @@
 # pylint: disable=too-many-locals
 
 import argparse
+import json
 import math
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import PIL.Image  # type: ignore
 
-from .generictools import (IntSpanDict, avg, distance_of_incresing_values, filter_ascii_alnum,
-                           flatten, linear_clusterization,
+from .generictools import (IntSpanDict, avg, distance_of_incresing_values,
+                           filter_ascii_alnum, flatten, linear_clusterization,
                            pick_the_largest_sublist)
 from .osutools import (OsuFileSomeMetadata, OsuHitObject, OsuModesEnum,
                        get_audio_file_from_section,
                        get_osu_hit_objects_from_section, get_osu_sections,
                        get_some_metadata_from_section)
-from .ragnatools import (RagnaRockDifficultyV1,
+from .ragnatools import (HandEnum, NoteLineIndexEnum, RagnaRockDifficultyV1,
                          RagnaRockHandsPositionsSimulator,
-                         RagnaRockInfoButDifficulties, NoteLineIndexEnum,
-                         HandEnum)
+                         RagnaRockInfoButDifficulties)
 
+PREVIEW_DURATION = 10
 RGX_OSU_SCHEMA = re.compile(r'(\d+) (.+?) - (.+)')
+BEATMAPSET_RAGNA_BORKED_MTIME = -1
+BEATMAPSET_RAGNA_BORKED_PATH = Path()
+BEATMAPSET_RAGNA_BORKED_DATA: Dict[str, str] = {}
+
+
+def beatmapset_ragna_borked_init(file: Path) -> int:
+    if not file.exists():
+        file.touch(exist_ok=True)
+    return file.stat().st_mtime_ns
+
+
+def beatmapset_ragna_borked_load(file: Path) -> bool:
+    global BEATMAPSET_RAGNA_BORKED_MTIME
+    global BEATMAPSET_RAGNA_BORKED_PATH
+    global BEATMAPSET_RAGNA_BORKED_DATA
+    if (mt := beatmapset_ragna_borked_init(file)) != BEATMAPSET_RAGNA_BORKED_MTIME or file != BEATMAPSET_RAGNA_BORKED_PATH:
+        BEATMAPSET_RAGNA_BORKED_MTIME = mt
+        BEATMAPSET_RAGNA_BORKED_PATH = file
+        BEATMAPSET_RAGNA_BORKED_DATA = dict(filter(lambda a: len(a) == 2, map(lambda a: a.split(
+            ';', 1), filter(len, map(str.strip, file.read_text(encoding='utf-8').splitlines())))))
+        return True
+    return False
+
+
+def beatmapset_ragna_borked_add(k: str, v: str):
+    global BEATMAPSET_RAGNA_BORKED_MTIME
+    global BEATMAPSET_RAGNA_BORKED_PATH
+    global BEATMAPSET_RAGNA_BORKED_DATA
+    if k not in BEATMAPSET_RAGNA_BORKED_DATA or BEATMAPSET_RAGNA_BORKED_DATA[k] != v:
+        BEATMAPSET_RAGNA_BORKED_DATA[k] = v
+        BEATMAPSET_RAGNA_BORKED_PATH.write_text(
+            '\n'.join(f'{k};{v}' for k, v in
+                      BEATMAPSET_RAGNA_BORKED_DATA.items()),
+            encoding='utf-8',
+        )
+        BEATMAPSET_RAGNA_BORKED_MTIME = BEATMAPSET_RAGNA_BORKED_PATH.stat().st_mtime_ns
+
+
+def beatmapset_ragna_borked_get(k: str) -> Optional[str]:
+    global BEATMAPSET_RAGNA_BORKED_DATA
+    return BEATMAPSET_RAGNA_BORKED_DATA.get(k, None)
 
 
 def get_parser():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('osu_beatmapset_path', type=Path,
+    parser = argparse.ArgumentParser(
+        prog=f'{Path(sys.executable).stem} -m {Path(__file__).parent.name}')
+    parser.add_argument('osu_beatmapset_path', type=Path, metavar='OSU_SONG',
                         help='The folder inside your Songs folder that holds the audio file and .osu files')
     parser.add_argument('--songs', action='store_const',
-                        default=False, const=True)
-    parser.add_argument('ragna_customsongs_path', type=Path, default=None, nargs='?',
+                        default=False, const=True, help='if OSU_SONG is the Songs folder and all songs should be processed in batch')
+    parser.add_argument('ragna_customsongs_path', type=Path,
+                        metavar='RAGNA_CUSTOMSONGS',
+                        default=None, nargs='?',
                         help='The CustomSongs folder for Raganarock')
     return parser
 
@@ -84,6 +130,10 @@ def convert_osu2ragna(beatmapset_osu: Path,
                       osu_title_default: str) -> bool:
     if not beatmapset_osu.is_dir():
         raise NotADirectoryError(beatmapset_osu)
+    beatmapset_ragna_borked_load(
+        beatmapset_ragna.parent.joinpath('borked.txt'))
+    if beatmapset_ragna_borked_get(str(osu_beatmapset_id_default)):
+        return True
     beatmapset_ragna_number = 1
     beatmapset_ragna_numbered = beatmapset_ragna.with_name(filter_ascii_alnum(
         f'{beatmapset_ragna.name}p{beatmapset_ragna_number}').lower())
@@ -94,9 +144,11 @@ def convert_osu2ragna(beatmapset_osu: Path,
         raise FileNotFoundError(beatmapset_osu / '*.osu')
     beatmapset_ragna_numbered.mkdir(parents=True, exist_ok=True)
     # Abort on known failures
-    if beatmapset_ragna_numbered.joinpath('broken_audio.flag').exists():
-        return True
-    if beatmapset_ragna_numbered.joinpath('no_eligible_osu_files.flag').exists():
+    if beatmapset_ragna_borked_get(str(osu_beatmapset_id_default)):
+        for x in beatmapset_ragna_numbered.glob('*'):
+            x.unlink()
+            del x
+        beatmapset_ragna_numbered.rmdir()
         return True
     # Load osu beatmaps in this set
     osu_beatsets: List[Tuple[OsuFileSomeMetadata, List[OsuHitObject]]] = (
@@ -112,27 +164,42 @@ def convert_osu2ragna(beatmapset_osu: Path,
         beatmapset_ragna_numbered.rmdir()
         return True
     # Abort on known failures [yes, again]
-    if osu_beatsets is None:
+    if osu_beatsets is None or len(osu_beatsets) <= 0:
+        for x in beatmapset_ragna_numbered.glob('*'):
+            x.unlink()
+            del x
+        beatmapset_ragna_numbered.rmdir()
         return True
-    if len(osu_beatsets) <= 0:
-        return True
+    # Merging metadata
+    osu_metadata_merged = OsuFileSomeMetadata.merge(
+        next(zip(*osu_beatsets)))  # type: ignore
+    make_audio_preview(beatmapset_ragna_numbered.joinpath('song.ogg'),
+                       beatmapset_ragna_numbered.joinpath('preview.ogg'),
+                       osu_metadata_merged.preview_start/1000,
+                       PREVIEW_DURATION,
+                       )
+    audio_duration = probe_audio_duration(
+        beatmapset_ragna_numbered.joinpath('song.ogg'))
     # Edge case: Ragnarock only supports 3 difficulties per beatmapset
     beatmapset_ragna_number_total = math.ceil(len(osu_beatsets) / 3)
     for i in range(2, beatmapset_ragna_number_total+1):
         j = beatmapset_ragna.with_name(filter_ascii_alnum(
             f'{beatmapset_ragna.name}p{i}').lower())
         j.mkdir(parents=True, exist_ok=True)
-        j.joinpath('song.egg').write_bytes(
-            beatmapset_ragna_numbered.joinpath('song.egg').read_bytes())
+        j.joinpath('song.ogg').write_bytes(
+            beatmapset_ragna_numbered.joinpath('song.ogg').read_bytes())
+        j.joinpath('preview.ogg').write_bytes(
+            beatmapset_ragna_numbered.joinpath('preview.ogg').read_bytes())
         j.joinpath('cover.jpg').write_bytes(
             beatmapset_ragna_numbered.joinpath('cover.jpg').read_bytes())
         del j
         del i
     # convert osu_beatsets into ragna_beatsets
     ragna_beatsets: Tuple[RagnaRockInfoButDifficulties,
-                          List[RagnaRockDifficultyV1]] = convert_beatsets_osu2ragna(osu_beatsets)
+                          List[RagnaRockDifficultyV1]] = convert_beatsets_osu2ragna(osu_beatsets, audio_duration)
     # sort ragna_beatsets by difficulty
     ragna_beatsets[1].sort(key=lambda a: (
+        a.difficulty_rankf,
         len(a.notes),
         a.difficulty_label))
     # write converted beatmap DATs into CustomSongs
@@ -144,7 +211,8 @@ def convert_osu2ragna(beatmapset_osu: Path,
     return False
 
 
-def convert_beatsets_osu2ragna(osu_beatsets: List[Tuple[OsuFileSomeMetadata, List[OsuHitObject]]]
+def convert_beatsets_osu2ragna(osu_beatsets: List[Tuple[OsuFileSomeMetadata, List[OsuHitObject]]],
+                               audio_duration: float
                                ) -> Tuple[RagnaRockInfoButDifficulties, List[RagnaRockDifficultyV1]]:
     osu_metadata_merged = OsuFileSomeMetadata.merge(
         next(zip(*osu_beatsets)))  # type: ignore
@@ -169,6 +237,10 @@ def convert_beatsets_osu2ragna(osu_beatsets: List[Tuple[OsuFileSomeMetadata, Lis
         osu_metadata_merged.artist,
         osu_metadata_merged.creator,
         figure_out_bpm(ragna_attention_pointss, 50, 240),
+        songApproximativeDuration=audio_duration,
+        previewStartTime=osu_metadata_merged.preview_start/1000,
+        previewDuration=max(0.1, min(PREVIEW_DURATION,
+                                     audio_duration - osu_metadata_merged.preview_start/1000)),
         customData=dict(
             generator='osu2ragna',
             source='osu!',
@@ -237,7 +309,7 @@ def convert_beatsets_osu2ragna(osu_beatsets: List[Tuple[OsuFileSomeMetadata, Lis
         ragna_difficulties.append(hands_pos_sim.build_coreography())
         ragna_difficulties[-1].difficulty_label = difficulty
         print(
-            f'      +-> {len(hands_pos_sim.coreography_ids):6d} {difficulty}')
+            f'      +-> {len(hands_pos_sim.coreography_ids):6d} - {ragna_difficulties[-1].difficulty_rankf:09.6f} - {ragna_difficulties[-1].difficulty_rank:02d} - {difficulty}')
         del osu_metadata
         del ragna_bpmd_attention_points
         del difficulty
@@ -264,13 +336,13 @@ def figure_out_bpm(ragna_attention_pointss: List[IntSpanDict[OsuHitObject]], mn:
         clusters_time_distance_between_notes)
     del clusters_time_distance_between_notes
     if len(cluster_time_distance_between_notes) <= 0:
-        return 120.0
+        return 120
     avg_cluster_time_distance_between_notes = avg(
         cluster_time_distance_between_notes)
     del cluster_time_distance_between_notes
     bpm = 60000/(1*avg_cluster_time_distance_between_notes)
     if bpm <= 0:
-        return 120.0
+        return 120
     while bpm < mn:
         bpm *= 2
     while bpm > mx:
@@ -298,8 +370,8 @@ def read_beats_osu(beatmapset_osu: Path, beatmapset_ragna: Path, osu_beatmap_pat
             osu_beatmap_sections)
         if len(osu_hit_objects) > 0 and metadata.mode == OsuModesEnum.Mania and metadata.circle_size == 4:
             print(f'  |> {metadata.mode.name} ~ {osu_beatmap_path.stem}')
-            ragna_beatmap_audio = beatmapset_ragna.joinpath('song.egg')
-            if convert_audio_osu2ragna(beatmapset_osu, ragna_beatmap_audio, osu_beatmap_sections):
+            ragna_beatmap_audio = beatmapset_ragna.joinpath('song.ogg')
+            if convert_audio_osu2ragna(osu_beatmapset_id_default, beatmapset_osu, ragna_beatmap_audio, osu_beatmap_sections):
                 return []
             ragna_beatmap_thumb = beatmapset_ragna.joinpath('cover.jpg')
             if convert_thumb_osu2ragna(beatmapset_osu, ragna_beatmap_thumb, osu_beatmap_sections):
@@ -307,10 +379,9 @@ def read_beats_osu(beatmapset_osu: Path, beatmapset_ragna: Path, osu_beatmap_pat
             osu_loaded_stuff.append((metadata, osu_hit_objects))
         del osu_beatmap_path
     if len(osu_loaded_stuff) <= 0:
-        beatmapset_ragna.joinpath('song.egg').unlink(missing_ok=True)
-        beatmapset_ragna.joinpath(
-            'no_eligible_osu_files.flag').write_text(
-            'no_eligible_osu_files')
+        beatmapset_ragna.joinpath('song.ogg').unlink(missing_ok=True)
+        beatmapset_ragna_borked_add(
+            str(osu_beatmapset_id_default), 'no_eligible_osu_files')
     return osu_loaded_stuff
 
 
@@ -348,24 +419,25 @@ def convert_thumb_osu2ragna(beatmapset_osu: Path, ragna_beatmap_thumb: Path, osu
     return False
 
 
-def convert_audio_osu2ragna(beatmapset_osu: Path, ragna_beatmap_audio: Path, osu_beatmap_sections: Dict[str, List[str]]) -> bool:
+def convert_audio_osu2ragna(osu_beatmapset_id_default: int, beatmapset_osu: Path, ragna_beatmap_audio: Path, osu_beatmap_sections: Dict[str, List[str]]) -> bool:
     if not ragna_beatmap_audio.exists():
-        ragna_beatmap_audio_tmp = ragna_beatmap_audio.with_suffix('.ogg')
+        ragna_beatmap_audio_tmp = ragna_beatmap_audio.with_suffix('.egg')
         osu_beatmap_audio = beatmapset_osu.joinpath(
             get_audio_file_from_section(osu_beatmap_sections))
         r = subprocess.run(
             ['ffmpeg', '-y',
+                '-v', 'quiet',
                 '-i', str(osu_beatmap_audio),
                 '-q', '9',
                 '-map_metadata', '-1',
                 '-vn', '-acodec', 'libvorbis',
+                '-f', 'ogg',
                 str(ragna_beatmap_audio_tmp),
              ],
         )
         if r.returncode:
-            ragna_beatmap_audio.parent.joinpath(
-                'broken_audio.flag').write_text(
-                    'broken_audio')
+            beatmapset_ragna_borked_add(
+                str(osu_beatmapset_id_default), 'broken_audio')
             if ragna_beatmap_audio_tmp.exists():
                 ragna_beatmap_audio_tmp.unlink()
             return True
@@ -375,3 +447,45 @@ def convert_audio_osu2ragna(beatmapset_osu: Path, ragna_beatmap_audio: Path, osu
         del osu_beatmap_audio
     del ragna_beatmap_audio
     return False
+
+
+def make_audio_preview(audio: Path, preview: Path, start: float, duration: float):
+    if not preview.exists():
+        audio_duration = probe_audio_duration(audio)
+        fade_duration = 0.075
+        actual_duration = min(duration, audio_duration-start)
+        if actual_duration <= 2.0:
+            fade_duration = 0.0
+        preview_tmp = preview.with_suffix('.egg')
+        subprocess.run(
+            ['ffmpeg', '-y',
+                '-v', 'quiet',
+                '-ss', str(start),
+                '-t', str(duration),
+                '-i', str(audio),
+                '-filter:a', f'afade=t=in:st=0:d={fade_duration},afade=t=out:st={actual_duration-fade_duration}:d={fade_duration}',
+                '-q', '5',
+                '-map_metadata', '-1',
+                '-vn', '-acodec', 'libvorbis',
+                '-f', 'ogg',
+                str(preview_tmp),
+             ],
+            check=True,
+        )
+        preview_tmp.rename(preview)
+
+
+def probe_audio_duration(audio: Path) -> float:
+    if not audio.exists():
+        return 0.0
+    r = subprocess.run(
+        ['ffprobe',
+            '-v', 'quiet',
+            '-show_format',
+            '-print_format', 'json',
+            str(audio),
+         ],
+        check=True,
+        stdout=subprocess.PIPE
+    )
+    return float(json.loads(r.stdout)['format']['duration'])

@@ -3,12 +3,16 @@
 Convert beatmaps from the `Songs` folder from osu! into `CustomLevels` folder of RagnaRock.
 
 ## Playability
-Surprisingly good. There are no hold notes, but the three 1.5\*\~2.2\* maps plays like 6\~8 hammers.
+Surprisingly good.
+
+Hammer-oriented difficulties are now calculated during conversion based on a regression done over [84 ranked beatmapsets at RagnaCustoms](https://ragnacustoms.com/song-library?search=&downloads_submitted_date=&downloads_filter_difficulties=&converted_maps=&wip_maps=&only_ranked=1&search_btn=1). They are based on a hypothetical strain that playing a beatmap would bring to your arms.
+
+Some medleys with 25+ minutes may exceed 50 hammers - they're as hard as it sounds.
 
 ## Requirements
  - Python
  - Pillow (Python Imaging Library)
- - ffmpeg (in PATH)
+ - ffmpeg (the executable, accessible from PATH)
 
 ## Usage
 ### Single beatmap

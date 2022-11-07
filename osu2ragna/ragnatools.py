@@ -1,10 +1,28 @@
 #!/usr/bin/env python3
 # -*- encoding: utf-8 -*-
 
-from enum import IntEnum
 import json
+import zlib
+from collections import defaultdict
+from enum import IntEnum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
+
+from .effort_constants import (EFFORT_CALCULATOR_DEFAULTS,
+                               EFFORT_CALCULATOR_RELOCATOR_DEFAULTS)
+
+RAGNAROCK_ENVIRONMENTS: Tuple[str, ...] = ("Midgard", "Alfheim", "Nidavellir",
+                                           "Asgard", "Muspelheim", "Helheim",
+                                           # "Hellfest",
+                                           # "DarkEmpty",
+                                           )
+
+
+def text_to_environment(text: str) -> str:
+    return RAGNAROCK_ENVIRONMENTS[
+        zlib.crc32(str(text).encode('utf-8')) % len(RAGNAROCK_ENVIRONMENTS)
+    ]
+
 
 '''https://bsmg.wiki/mapping/map-format.html'''
 
@@ -16,8 +34,9 @@ class RagnaRockInfoButDifficulties:
                  songAuthorName: str = '',
                  levelAuthorName: str = '',
                  beatsPerMinute: float = 150.00,
+                 songApproximativeDuration: float = 0,
                  previewStartTime: float = 20.25,
-                 previewDuration: float = 10.00,
+                 previewDuration: float = 20.00,
                  customData: Dict[str, Any] = None
                  ) -> None:
         self.version = '1'
@@ -30,11 +49,13 @@ class RagnaRockInfoButDifficulties:
         self._msBetweenTimePoints: float = 60000/(4*self.beatsPerMinute)
         self.shuffle = 0
         self.shufflePeriod = 0.5
+        self.songApproximativeDuration = songApproximativeDuration
         self.previewStartTime = previewStartTime
         self.previewDuration = previewDuration
-        self.songFilename = 'song.egg'
+        self.songFilename = 'song.ogg'
         self.coverImageFilename = 'cover.jpg'
-        self.environmentName = 'Midgard'
+        self.environmentName = text_to_environment(
+            f'{songName}{songSubName}{songAuthorName}{levelAuthorName}')
         self.songTimeOffset = 0
         self.customData: Dict[str, Any] = customData or {}
         self.difficultyBeatmapSets: list = []
@@ -52,6 +73,7 @@ class RagnaRockInfoButDifficulties:
             self.songAuthorName,
             self.levelAuthorName,
             self.beatsPerMinute,
+            self.songApproximativeDuration,
             self.previewStartTime,
             self.previewDuration,
             self.customData,
@@ -64,6 +86,7 @@ class RagnaRockInfoButDifficulties:
             self.songAuthorName,
             self.levelAuthorName,
             self.beatsPerMinute,
+            self.songApproximativeDuration,
             self.previewStartTime,
             self.previewDuration,
             self.customData,
@@ -78,6 +101,7 @@ class RagnaRockInfo(RagnaRockInfoButDifficulties):
                  songAuthorName: str = '',
                  levelAuthorName: str = '',
                  beatsPerMinute: float = 150.00,
+                 songApproximativeDuration: float = 0,
                  previewStartTime: float = 20.25,
                  previewDuration: float = 10.00,
                  customData: Dict[str, Any] = None,
@@ -89,6 +113,7 @@ class RagnaRockInfo(RagnaRockInfoButDifficulties):
             songAuthorName,
             levelAuthorName,
             beatsPerMinute,
+            songApproximativeDuration,
             previewStartTime,
             previewDuration,
             customData,
@@ -110,6 +135,7 @@ class RagnaRockInfo(RagnaRockInfoButDifficulties):
             "_shufflePeriod": self.shufflePeriod,
             "_previewStartTime": self.previewStartTime,
             "_previewDuration": self.previewDuration,
+            "_songApproximativeDuration": round(self.songApproximativeDuration),
             "_songFilename": self.songFilename,
             "_coverImageFilename": self.coverImageFilename,
             "_environmentName": self.environmentName,
@@ -127,14 +153,15 @@ class RagnaRockInfo(RagnaRockInfoButDifficulties):
                     "_difficultyBeatmaps": [
                         {
                             "_difficulty": di.name,
-                            "_difficultyRank": di.value,
-                            "_beatmapFilename": f"Standard{di.name}.dat",
+                            "_difficultyRank": df.difficulty_rank,
+                            "_beatmapFilename": f"{di.name}.dat",
                             "_noteJumpMovementSpeed": 10,
                             "_noteJumpStartBeatOffset": 0,
                             "_customData": {
                                 "_difficultyLabel": df.difficulty_label,
                                 "_editorOffset": 0,
                                 "_editorOldOffset": 0,
+                                "_difficulty": df.difficulty_rankf,
                                 "_warnings": [],
                                 "_information": [],
                                 "_suggestions": [],
@@ -149,11 +176,32 @@ class RagnaRockInfo(RagnaRockInfoButDifficulties):
         }
 
     def write_to(self, path: Path):
-        path.joinpath('Info.dat').write_text(json.dumps(
+        path.joinpath('info.dat').write_text(json.dumps(
             self.to_jsonable(), ensure_ascii=False, indent=2), encoding='utf-8')
         for di, df in zip(self._difficulty_internals, self.difficultyBeatmapSets):
-            path.joinpath(f"Standard{di.name}.dat").write_text(json.dumps(
+            path.joinpath(f"{di.name}.dat").write_text(json.dumps(
                 df.to_jsonable(), ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+
+    @classmethod
+    def read_from(cls, path: Path) -> 'RagnaRockInfo':
+        clsjson = json.loads(path.read_text(encoding='utf-8', errors='ignore'))
+        return cls(
+            songName=clsjson['_songName'],
+            songSubName=clsjson['_songSubName'],
+            songAuthorName=clsjson['_songAuthorName'],
+            levelAuthorName=clsjson['_levelAuthorName'],
+            beatsPerMinute=clsjson['_beatsPerMinute'],
+            previewStartTime=clsjson['_previewStartTime'],
+            previewDuration=clsjson['_previewDuration'],
+            customData=clsjson.get('_customData', {}),
+            difficultyBeatmapSets=[RagnaRockDifficultyV1.from_json(path.parent/y['_beatmapFilename'],
+                                                                   y['_difficulty'],
+                                                                   y['_difficultyRank'],
+                                                                   clsjson['_beatsPerMinute'],
+                                                                   )
+                                   for x in clsjson['_difficultyBeatmapSets']
+                                   for y in x['_difficultyBeatmaps']],
+        )
 
 
 class RagnarockDifficultyEnum(IntEnum):
@@ -178,7 +226,17 @@ class RagnaRockDifficultyV1:
         self.version = '1'
         self.notes: List[RagnaRockDifficultyNote] = []
         self.difficulty_label: str = 'Normal'
+        self.difficulty_rankf: float = 5
+        self.bpm: float = 150
         self.customData: Dict[str, Any] = {}
+
+    @property
+    def difficulty_rank(self) -> int:
+        return round(max(1, self.difficulty_rankf))
+
+    @difficulty_rank.setter
+    def difficulty_rank(self, value: float):
+        self.difficulty_rankf = float(value)
 
     def to_jsonable(self) -> dict:
         return {
@@ -187,12 +245,40 @@ class RagnaRockDifficultyV1:
                 "_time": 0,
                 "_BPMChanges": [],
                 "_bookmarks": [],
+                "_difficulty": self.difficulty_rankf,
                 **self.customData,
             },
             "_events": [],
             "_notes": list(map(RagnaRockDifficultyNote.to_jsonable, self.notes)),
             "_obstacles": [],
         }
+
+    @classmethod
+    def from_json(cls, path: Path, difficulty_name: str, difficulty_rank: int, bpm: float) -> 'RagnaRockDifficultyV1':
+        clsjson = json.loads(path.read_text(encoding='utf-8', errors='ignore'))
+        self = cls()
+        self.difficulty_label = difficulty_name
+        self.difficulty_rank = difficulty_rank
+        self.customData = clsjson['_customData']
+        self.version = clsjson['_version']
+        self.bpm = bpm
+        self.notes = list(
+            map(RagnaRockDifficultyNote.from_jsonable, clsjson['_notes']))
+        return self
+
+    @property
+    def beatsPerMinute(self) -> float:
+        return self.bpm
+
+    @property
+    def _msBetweenTimePoints(self) -> float:
+        return 60000/(4*self.beatsPerMinute)
+
+    def round_to_beat(self, event_ms: Union[int, float]) -> int:
+        return round(round(event_ms/self._msBetweenTimePoints)*self._msBetweenTimePoints)
+
+    def convert_to_beat(self, event_ms: Union[int, float]) -> float:
+        return round(round(event_ms/self._msBetweenTimePoints)/4, 2)
 
 
 class RagnaRockDifficultyNote:
@@ -203,6 +289,9 @@ class RagnaRockDifficultyNote:
         self.time: float = time
         self.lineIndex: int = lineIndex
 
+    def __repr__(self) -> str:
+        return f'{type(self).__name__}({self.time}, {self.lineIndex})'
+
     def to_jsonable(self) -> dict:
         return {
             "_time": self.time,
@@ -211,6 +300,13 @@ class RagnaRockDifficultyNote:
             "_type": 0,
             "_cutDirection": 1,
         }
+
+    @classmethod
+    def from_jsonable(cls, clsjson: dict) -> 'RagnaRockDifficultyNote':
+        return cls(
+            time=clsjson['_time'],
+            lineIndex=clsjson['_lineIndex'],
+        )
 
 
 class NoteLineIndexEnum(IntEnum):
@@ -389,6 +485,7 @@ class RagnaRockHandsPositionsSimulator:
 
     def build_coreography(self) -> RagnaRockDifficultyV1:
         difficulty = RagnaRockDifficultyV1()
+        difficulty.bpm = self.bsi.beatsPerMinute
         for id_ in self.coreography_ids:
             coreography = self.coreography_contents[id_]
             difficulty.notes.append(
@@ -399,4 +496,110 @@ class RagnaRockHandsPositionsSimulator:
             )
             del coreography
             del id_
+        difficulty.difficulty_rankf = DefaultEffortCalculator().predict(difficulty)
         return difficulty
+
+
+def nonzero(f: float) -> float:
+    if f == 0.0:
+        return 0.000000001
+    return f
+
+
+class EffortCalculator:
+    def __init__(self,
+                 hit_effort: float,
+                 move_effort: float,
+                 away_effort: float,
+                 doublehand_effort: float,
+                 relax_behavior: float,
+                 relax_rate: float,
+                 ) -> None:
+        self.hit_effort: float = hit_effort
+        self.move_effort: float = move_effort
+        self.away_effort: float = away_effort
+        self.doublehand_effort: float = doublehand_effort
+        self.relax_behavior: float = relax_behavior
+        self.relax_rate: float = relax_rate
+
+    def __call__(self, song: RagnaRockDifficultyV1) -> float:
+        return self.predict(song)
+
+    def predict(self, song: RagnaRockDifficultyV1) -> float:
+        max_effort = 0.0
+        hits: Dict[int, List[RagnaRockDifficultyNote]] = defaultdict(list)
+        for note in song.notes:
+            hits[round(1000*60*note.time/song.bpm)].append(note)
+        hands_nat: Tuple[float, float] = (1.5, 2.5)
+        hands_pos: Tuple[float, float] = (1.5, 2.5)
+        hands_use: Tuple[float, float] = (0.0, 0.0)
+        hands_str: Tuple[float, float] = (0.0, 0.0)
+        for time_ms, notes in sorted(hits.items()):
+            candidates: List[Tuple[
+                float,
+                Optional[Tuple[float, int]],
+                Optional[Tuple[float, int]],
+            ]] = []
+            for hp in self._shuffle_notes(notes):
+                effort_mltplr = self.doublehand_effort if hp[0] is not None and hp[1] is not None else 1.0
+                hpes = [
+                    None if hp[i] is None else (
+                        (
+                            self.hit_effort +
+                            abs(hp[i]-hands_nat[i])*self.away_effort +
+                            abs(hp[i]-hands_pos[i])*self.move_effort
+                        ) * effort_mltplr +
+                        max(0.0,
+                            hands_str[i] - (nonzero((time_ms/1000 - hands_use[i])*100) ** self.relax_behavior)*self.relax_rate / 100),
+                        hp[i]
+                    )
+                    for i in range(2)
+                ]
+                candidates.append(
+                    tuple((max(hpe[0] for hpe in hpes if hpe is not None), hpes[0], hpes[1])))
+            candidates.sort(key=lambda a: a[0])
+            if len(candidates) > 0:
+                new_high_effort, lhand, rhand = candidates[0]
+                max_effort = max(max_effort, new_high_effort)
+                hands_str = (hands_str[0] if lhand is None else lhand[0],
+                             hands_str[1] if rhand is None else rhand[0],
+                             )
+                hands_pos = (hands_pos[0] if lhand is None else float(lhand[1]),
+                             hands_pos[1] if rhand is None else float(
+                                 rhand[1]),
+                             )
+        return max_effort
+
+    def error(self, song: RagnaRockDifficultyV1) -> float:
+        return self(song) - song.difficulty_rank
+
+    def abs_error(self, song: RagnaRockDifficultyV1) -> float:
+        return abs(self.error(song))
+
+    def _shuffle_notes(self, notes: List[RagnaRockDifficultyNote]) -> List[Tuple[Optional[int], Optional[int]]]:
+        inotes = sorted({n.lineIndex for n in notes})
+        if len(inotes) == 0:
+            return []
+        if len(inotes) == 1:
+            return [(inotes[0], None), (None, inotes[0])]
+        return [(inotes[i], inotes[j])
+                for i in range(0, len(inotes)-1)
+                for j in range(i+1, len(inotes))]
+
+
+class DefaultEffortCalculator(EffortCalculator):
+    def __init__(self) -> None:
+        super().__init__(
+            EFFORT_CALCULATOR_DEFAULTS[0],
+            EFFORT_CALCULATOR_DEFAULTS[1],
+            EFFORT_CALCULATOR_DEFAULTS[2],
+            EFFORT_CALCULATOR_DEFAULTS[3],
+            EFFORT_CALCULATOR_DEFAULTS[4],
+            EFFORT_CALCULATOR_DEFAULTS[5],
+        )
+
+    def __call__(self, song: RagnaRockDifficultyV1) -> float:
+        return self.predict(song)
+
+    def predict(self, song: RagnaRockDifficultyV1) -> float:
+        return super().predict(song) * EFFORT_CALCULATOR_RELOCATOR_DEFAULTS[0] + EFFORT_CALCULATOR_RELOCATOR_DEFAULTS[1]

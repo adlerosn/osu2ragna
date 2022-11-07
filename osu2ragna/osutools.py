@@ -267,6 +267,7 @@ class OsuFileSomeMetadata:
         beatmap_set_id: int,
         beatmap_id: int,
         circle_size: Optional[float] = None,
+        preview_start: int = 0,
         *args,
         **kwargs
     ):
@@ -279,6 +280,7 @@ class OsuFileSomeMetadata:
         self.beatmap_set_id = beatmap_set_id
         self.beatmap_id = beatmap_id
         self.circle_size = circle_size
+        self.preview_start = preview_start
 
     @classmethod
     def merge(cls, metadatas: List['OsuFileSomeMetadata']) -> 'OsuFileSomeMetadata':
@@ -305,7 +307,8 @@ class OsuFileSomeMetadata:
         return (f'{type(self).__name__}(' +
                 f'{type(self.mode).__name__}.{self.mode.name}, {self.difficulty!r}, ' +
                 f'{self.title!r}, {self.artist!r}, {self.creator!r}, ' +
-                f'{self.beatmap_set_id!r}, {self.beatmap_id!r})')
+                f'{self.beatmap_set_id!r}, {self.beatmap_id!r}, ' +
+                f'{self.circle_size!r}, {self.preview_start!r})')
 
 
 class OsuTimingPoint:
@@ -426,6 +429,8 @@ def get_some_metadata_from_section(osu_sections: Dict[str, List[str]]) -> OsuFil
         osu_sections, 'Difficulty', ':')
     circle_size_t = difficulty.get('CircleSize', '').strip()
     circle_size = None if not circle_size_t else float(circle_size_t)
+    preview_time = int(get_section_properties_from_section(
+        osu_sections, 'General', ': ').get('PreviewTime', '0').strip())
     return OsuFileSomeMetadata(
         mode,
         metadata.get('Version', 'Normal'),
@@ -435,6 +440,7 @@ def get_some_metadata_from_section(osu_sections: Dict[str, List[str]]) -> OsuFil
         int(metadata.get('BeatmapSetID', '0')),
         int(metadata.get('BeatmapID', '0')),
         circle_size,
+        preview_time,
     )
 
 
