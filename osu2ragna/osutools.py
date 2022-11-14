@@ -110,14 +110,14 @@ class OsuHitObject:
                 # x,y,time,type,hitSound,endTime,hitSample
                 # [...]                 ,endTime,hitSample
                 # Extras idx:           ,0      ,1
-                endTime = int(self._extras[0])
-                return endTime/1000
+                end_time = int(self._extras[0])
+                return end_time/1000
             case OsuHitObjectType.Hold:
                 # x,y,time,type,hitSound,endTime:hitSample
                 # [...]                 ,endTime:hitSample
                 # Extras idx:           ,0
-                endTime = int(self._extras[0].split(':', 1)[0])
-                return endTime / 1000
+                end_time = int(self._extras[0].split(':', 1)[0])
+                return end_time / 1000
             case OsuHitObjectType.Slider:
                 # x,y,time,type,hitSound,curveType|curvePoints,slides,length,edgeSounds,edgeSets,hitSample
                 # [...]                 ,curveType|curvePoints,slides,length,edgeSounds,edgeSets,hitSample
@@ -242,7 +242,7 @@ class OsuHitObject:
             if timing_point.time > time_sec:
                 break
             best_timing_point = timing_point
-        beat_length = best_timing_point.beatLength
+        beat_length = best_timing_point.beat_length
         return OsuHitObject(slide_multiplier, beat_length, x, y, time_sec, tpe, hitsound, other, timing_point=best_timing_point)
 
     def __repr__(self):
@@ -315,10 +315,10 @@ class OsuTimingPoint:
     def __init__(
         self,
         time: float,
-        beatLength: float,
+        beat_length: float,
         meter: int,
-        sampleSet: int,
-        sampleIndex: int,
+        sample_set: int,
+        sample_index: int,
         volume: int,
         inherited: bool,
         effects: int,
@@ -328,10 +328,10 @@ class OsuTimingPoint:
     ):
         super().__init__(*args, **kwargs)
         self.time = time
-        self.beatLength = beatLength
+        self.beat_length = beat_length
         self.meter = meter
-        self.sampleSet = sampleSet
-        self.sampleIndex = sampleIndex
+        self.sample_set = sample_set
+        self.sample_index = sample_index
         self.volume = volume
         self.inherited = inherited
         self.effects = effects
@@ -343,10 +343,10 @@ class OsuTimingPoint:
     @ classmethod
     def from_line(cls, osu_line: str, last_base: Optional['OsuTimingPoint'] = None) -> 'OsuTimingPoint':
         """time,beatLength,meter,sampleSet,sampleIndex,volume,uninherited,effects"""
-        (time, beatLength, meter, sampleSet, sampleIndex, volume,
+        (time, beat_length, meter, sample_set, sample_index, volume,
          un_inherited, effects, *_) = [*osu_line.split(','), *(['0']*8)]
-        args: List[Any] = [int(round(float(time))) / 1000, float(beatLength), int(meter),
-                           int(sampleSet), int(sampleIndex), int(volume),
+        args: List[Any] = [int(round(float(time))) / 1000, float(beat_length), int(meter),
+                           int(sample_set), int(sample_index), int(volume),
                            not bool(int(un_inherited)), int(effects)]
         base_time = args[0]
         if args[6] == '1':  # inherits
@@ -354,16 +354,14 @@ class OsuTimingPoint:
                 raise ValueError("Cannot inherit value from nowhere")
             args[2] = last_base.meter
             if args[1] < 0:
-                args[1] = (-100 / args[1]) * last_base.beatLength
-            # if args[1] == 300:
-            #     raise Exception(args)
+                args[1] = (-100 / args[1]) * last_base.beat_length
             base_time = last_base.time
         if args[2] == 0:
             args[2] = 4
         if args[1] < 0:
             args[1] = -args[1]
         if args[1] == 0:
-            args[1] = last_base.beatLength  # type: ignore
+            args[1] = last_base.beat_length  # type: ignore
         return OsuTimingPoint(*args, base_time=base_time)  # type: ignore
 
 
@@ -400,11 +398,12 @@ def get_osu_hit_objects_from_section(osu_sections: Dict[str, List[str]]) -> List
         del osu_timing_point_line
     del osu_timing_points_last_base
     del osu_timing_points_section
-    osu_hit_objects_section = osu_sections['HitObjects']
-    for osu_hit_object_line in osu_hit_objects_section:
-        oho = OsuHitObject.from_line(
-            osu_hit_object_line, osu_timing_points_objects, slider_multiplier)
-        osu_hit_objects.append(oho)
+    if len(osu_timing_points_objects) > 0:
+        osu_hit_objects_section = osu_sections['HitObjects']
+        for osu_hit_object_line in osu_hit_objects_section:
+            oho = OsuHitObject.from_line(
+                osu_hit_object_line, osu_timing_points_objects, slider_multiplier)
+            osu_hit_objects.append(oho)
     return osu_hit_objects
 
 

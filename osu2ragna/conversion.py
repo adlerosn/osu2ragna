@@ -32,6 +32,10 @@ RGX_OSU_SCHEMA = re.compile(r'(\d+) (.+?) - (.+)')
 BEATMAPSET_RAGNA_BORKED_MTIME = -1
 BEATMAPSET_RAGNA_BORKED_PATH = Path()
 BEATMAPSET_RAGNA_BORKED_DATA: Dict[str, str] = {}
+PREVIEW_OGG = 'preview.ogg'
+SONG_OGG = 'song.ogg'
+COVER_JPG = 'cover.jpg'
+INFO_DAT = 'info.dat'
 
 
 def beatmapset_ragna_borked_init(file: Path) -> int:
@@ -83,6 +87,8 @@ def get_parser():
                         metavar='RAGNA_CUSTOMSONGS',
                         default=None, nargs='?',
                         help='The CustomSongs folder for Raganarock')
+    parser.add_argument('--overwrite', action='store_const',
+                        const=True, default=False, help='Overwrite already processed beatmaps (default: skip)')
     return parser
 
 
@@ -110,7 +116,8 @@ def main():
         convert_osu2ragna(
             path,
             sbr.joinpath(f'{artist}{title}osu{bmsid}'),
-            bmsid, artist, title
+            bmsid, artist, title,
+            args.overwrite,
         )
     else:
         for pth in list(path.glob('*')):
@@ -120,14 +127,21 @@ def main():
                     sbr = args.ragna_customsongs_path
                     o = sbr.joinpath(f'{artist}{title}osu{bmsid}')
                     print(o.name)
-                    convert_osu2ragna(pth, o, bmsid, artist, title)
+                    convert_osu2ragna(
+                        pth,
+                        o,
+                        bmsid, artist, title,
+                        args.overwrite,
+                    )
 
 
 def convert_osu2ragna(beatmapset_osu: Path,
                       beatmapset_ragna: Path,
                       osu_beatmapset_id_default: int,
                       osu_artist_default: str,
-                      osu_title_default: str) -> bool:
+                      osu_title_default: str,
+                      overwriting: bool,
+                      ) -> bool:
     if not beatmapset_osu.is_dir():
         raise NotADirectoryError(beatmapset_osu)
     beatmapset_ragna_borked_load(
@@ -137,8 +151,16 @@ def convert_osu2ragna(beatmapset_osu: Path,
     beatmapset_ragna_number = 1
     beatmapset_ragna_numbered = beatmapset_ragna.with_name(filter_ascii_alnum(
         f'{beatmapset_ragna.name}p{beatmapset_ragna_number}').lower())
-    if beatmapset_ragna_numbered.exists() and not beatmapset_ragna_numbered.is_dir():
-        raise FileExistsError(beatmapset_ragna_numbered)
+    if beatmapset_ragna_numbered.exists():
+        if not beatmapset_ragna_numbered.is_dir():
+            raise FileExistsError(beatmapset_ragna_numbered)
+        elif (
+            beatmapset_ragna_numbered.joinpath(PREVIEW_OGG).is_file() and
+            beatmapset_ragna_numbered.joinpath(SONG_OGG).is_file() and
+            beatmapset_ragna_numbered.joinpath(INFO_DAT).is_file() and
+            not overwriting
+        ):
+            return True
     osu_beatmap_paths: List[Path] = list(beatmapset_osu.glob('*.osu'))
     if len(osu_beatmap_paths) <= 0:
         raise FileNotFoundError(beatmapset_osu / '*.osu')
@@ -173,25 +195,25 @@ def convert_osu2ragna(beatmapset_osu: Path,
     # Merging metadata
     osu_metadata_merged = OsuFileSomeMetadata.merge(
         next(zip(*osu_beatsets)))  # type: ignore
-    make_audio_preview(beatmapset_ragna_numbered.joinpath('song.ogg'),
-                       beatmapset_ragna_numbered.joinpath('preview.ogg'),
+    make_audio_preview(beatmapset_ragna_numbered.joinpath(SONG_OGG),
+                       beatmapset_ragna_numbered.joinpath(PREVIEW_OGG),
                        osu_metadata_merged.preview_start/1000,
                        PREVIEW_DURATION,
                        )
     audio_duration = probe_audio_duration(
-        beatmapset_ragna_numbered.joinpath('song.ogg'))
+        beatmapset_ragna_numbered.joinpath(SONG_OGG))
     # Edge case: Ragnarock only supports 3 difficulties per beatmapset
     beatmapset_ragna_number_total = math.ceil(len(osu_beatsets) / 3)
     for i in range(2, beatmapset_ragna_number_total+1):
         j = beatmapset_ragna.with_name(filter_ascii_alnum(
             f'{beatmapset_ragna.name}p{i}').lower())
         j.mkdir(parents=True, exist_ok=True)
-        j.joinpath('song.ogg').write_bytes(
-            beatmapset_ragna_numbered.joinpath('song.ogg').read_bytes())
-        j.joinpath('preview.ogg').write_bytes(
-            beatmapset_ragna_numbered.joinpath('preview.ogg').read_bytes())
-        j.joinpath('cover.jpg').write_bytes(
-            beatmapset_ragna_numbered.joinpath('cover.jpg').read_bytes())
+        j.joinpath(SONG_OGG).write_bytes(
+            beatmapset_ragna_numbered.joinpath(SONG_OGG).read_bytes())
+        j.joinpath(PREVIEW_OGG).write_bytes(
+            beatmapset_ragna_numbered.joinpath(PREVIEW_OGG).read_bytes())
+        j.joinpath(COVER_JPG).write_bytes(
+            beatmapset_ragna_numbered.joinpath(COVER_JPG).read_bytes())
         del j
         del i
     # convert osu_beatsets into ragna_beatsets
@@ -370,53 +392,58 @@ def read_beats_osu(beatmapset_osu: Path, beatmapset_ragna: Path, osu_beatmap_pat
             osu_beatmap_sections)
         if len(osu_hit_objects) > 0 and metadata.mode == OsuModesEnum.Mania and metadata.circle_size == 4:
             print(f'  |> {metadata.mode.name} ~ {osu_beatmap_path.stem}')
-            ragna_beatmap_audio = beatmapset_ragna.joinpath('song.ogg')
+            ragna_beatmap_audio = beatmapset_ragna.joinpath(SONG_OGG)
             if convert_audio_osu2ragna(osu_beatmapset_id_default, beatmapset_osu, ragna_beatmap_audio, osu_beatmap_sections):
                 return []
-            ragna_beatmap_thumb = beatmapset_ragna.joinpath('cover.jpg')
+            ragna_beatmap_thumb = beatmapset_ragna.joinpath(COVER_JPG)
             if convert_thumb_osu2ragna(beatmapset_osu, ragna_beatmap_thumb, osu_beatmap_sections):
                 return []
             osu_loaded_stuff.append((metadata, osu_hit_objects))
         del osu_beatmap_path
     if len(osu_loaded_stuff) <= 0:
-        beatmapset_ragna.joinpath('song.ogg').unlink(missing_ok=True)
+        beatmapset_ragna.joinpath(SONG_OGG).unlink(missing_ok=True)
         beatmapset_ragna_borked_add(
             str(osu_beatmapset_id_default), 'no_eligible_osu_files')
     return osu_loaded_stuff
 
 
 def convert_thumb_osu2ragna(beatmapset_osu: Path, ragna_beatmap_thumb: Path, osu_beatmap_sections: Dict[str, List[str]]) -> bool:
-    if ragna_beatmap_thumb.exists():
-        return False
-    imageline = next(filter(lambda x: x.startswith('0,0,'),
-                            osu_beatmap_sections.get('Events', [])), None)
-    im = PIL.Image.new('RGB', (512, 512), 0)
-    if imageline is not None:
-        osu_bg = beatmapset_osu.joinpath(imageline.split(',')[2].strip('"'))
-        if osu_bg.exists():
-            im = PIL.Image.open(str(osu_bg)).convert('RGB')
-            sx, sy = im.size
-            if sx != sy:
-                d = min(sx, sy)
-                if sx == d:
-                    # L T R B
-                    im = im.crop((
-                        0,
-                        int(sy/2 - d/2),
-                        d,
-                        int(sy/2 + d/2),
-                    ))
-                else:
-                    # L T R B
-                    im = im.crop((
-                        int(sx/2 - d/2),
-                        0,
-                        int(sx/2 + d/2),
-                        d,
-                    ))
-            im.thumbnail((512, 512))
-    im.save(str(ragna_beatmap_thumb))
+    if not ragna_beatmap_thumb.exists():
+        imageline = next(filter(lambda x: x.startswith('0,0,'),
+                                osu_beatmap_sections.get('Events', [])), None)
+        im = PIL.Image.new('RGB', (512, 512), 0)
+        if imageline is not None:
+            osu_bg = beatmapset_osu.joinpath(
+                imageline.split(',')[2].strip('"'))
+            if osu_bg.exists():
+                im = PIL.Image.open(str(osu_bg)).convert('RGB')
+                im = im_crop_square_center(im)
+                im.thumbnail((512, 512))
+        im.save(str(ragna_beatmap_thumb))
     return False
+
+
+def im_crop_square_center(im: PIL.Image.Image) -> PIL.Image.Image:
+    sx, sy = im.size
+    if sx != sy:
+        d = min(sx, sy)
+        if sx == d:
+            # L T R B
+            im = im.crop((
+                0,
+                int(sy/2 - d/2),
+                d,
+                int(sy/2 + d/2),
+            ))
+        else:
+            # L T R B
+            im = im.crop((
+                int(sx/2 - d/2),
+                0,
+                int(sx/2 + d/2),
+                d,
+            ))
+    return im
 
 
 def convert_audio_osu2ragna(osu_beatmapset_id_default: int, beatmapset_osu: Path, ragna_beatmap_audio: Path, osu_beatmap_sections: Dict[str, List[str]]) -> bool:
@@ -452,8 +479,9 @@ def convert_audio_osu2ragna(osu_beatmapset_id_default: int, beatmapset_osu: Path
 def make_audio_preview(audio: Path, preview: Path, start: float, duration: float):
     if not preview.exists():
         audio_duration = probe_audio_duration(audio)
+        start = min(max(0.0, start), audio_duration-duration/2)
         fade_duration = 0.075
-        actual_duration = min(duration, audio_duration-start)
+        actual_duration = max(0.0, min(duration, audio_duration-start))
         if actual_duration <= 2.0:
             fade_duration = 0.0
         preview_tmp = preview.with_suffix('.egg')

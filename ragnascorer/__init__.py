@@ -6,7 +6,7 @@ import sys
 from concurrent.futures import Future, ProcessPoolExecutor
 from multiprocessing import cpu_count
 from pathlib import Path
-from typing import Any, Callable, List, Tuple, Union
+from typing import Any, Callable, Generator, Iterable, List, Tuple, Union
 
 from osu2ragna.ragnatools import (EffortCalculator, RagnaRockDifficultyV1,
                                   RagnaRockInfo)
@@ -30,12 +30,12 @@ def write_effort_constants(
     s += 'from typing import Tuple\n'
     s += '\n'
     s += 'EFFORT_CALCULATOR_DEFAULTS: Tuple[float, float, float, float, float, float] = (\n'
-    s += f'    {hit_effort},\n'
-    s += f'    {move_effort},\n'
-    s += f'    {away_effort},\n'
-    s += f'    {doublehand_effort},\n'
-    s += f'    {relax_behavior},\n'
-    s += f'    {relax_rate},\n'
+    s += f'    {hit_effort:.7f},\n'
+    s += f'    {move_effort:.7f},\n'
+    s += f'    {away_effort:.7f},\n'
+    s += f'    {doublehand_effort:.7f},\n'
+    s += f'    {relax_behavior:.7f},\n'
+    s += f'    {relax_rate:.7f},\n'
     s += ')\n'
     s += '\n'
     s += 'EFFORT_CALCULATOR_RELOCATOR_DEFAULTS: Tuple[float, float] = (\n'
@@ -44,6 +44,38 @@ def write_effort_constants(
     s += ')\n'
     Path(osu2ragna.effort_constants.__file__).write_text(s, encoding='utf-8')
     return s
+
+
+RANGE_ARGS = Union[Tuple[int], Tuple[int, int], Tuple[int, int, int]]
+NUMERIC = Union[int, float]
+
+
+def prod(l: Iterable[NUMERIC]) -> float:
+    a = 1.0
+    for e in l:
+        a *= e
+    return a
+
+
+def nested_range_generator(l: List[RANGE_ARGS]) -> Tuple[int, Generator[Tuple[int, ...], None, None]]:
+    tot = int(0 if len(l) <= 0 else prod(map(lambda a: len(range(*a)), l)))
+    if tot <= 0:
+        return (0, (tuple() for _ in []))
+    return (tot, _nested_range_generator(l))
+
+
+def _nested_range_generator(l: List[RANGE_ARGS]) -> Generator[Tuple[int, ...], None, None]:
+    yield from []
+    if len(l) < 1:
+        raise ValueError
+    elif len(l) > 1:
+        for e in l:
+            for i in range(*e):
+                for n in _nested_range_generator(l[1:]):
+                    yield (i, *n)
+    else:
+        for i in range(*l[0]):
+            yield (i,)
 
 
 def get_parser():
@@ -92,47 +124,42 @@ def load_ragnasongs(ragna_customsongs_path: Path) -> List[RagnaRockInfo]:
 
 class ForeignProcessTester:
     def __init__(self,
-                 songs,
-                 hit_effort,
-                 hit_effort_,
-                 move_effort,
-                 move_effort_,
-                 away_effort,
-                 away_effort_,
-                 doublehand_effort,
-                 doublehand_effort_,
-                 relax_behavior,
-                 relax_behavior_,
-                 relax_rate,
-                 relax_rate_,
-                 magnitude,
+                 songs: List[RagnaRockDifficultyV1],
+                 hit_effort: float,
+                 move_effort: float,
+                 away_effort: float,
+                 doublehand_effort: float,
+                 relax_behavior: float,
+                 relax_rate: float,
+                 magnitude: int,
                  ) -> None:
-        self.songs: list = songs
+        self.songs: List[RagnaRockDifficultyV1] = songs
         self.hit_effort: float = hit_effort
         self.move_effort: float = move_effort
         self.away_effort: float = away_effort
         self.doublehand_effort: float = doublehand_effort
         self.relax_behavior: float = relax_behavior
         self.relax_rate: float = relax_rate
-        self.hit_effort_: int = hit_effort_
-        self.move_effort_: int = move_effort_
-        self.away_effort_: int = away_effort_
-        self.doublehand_effort_: int = doublehand_effort_
-        self.relax_behavior_: int = relax_behavior_
-        self.relax_rate_: int = relax_rate_
         self.magnitude: int = magnitude
 
-    def __call__(self) -> Tuple[Tuple[float, float, float, float, float, float, float, float, float], int, int, int, int, int, int]:
+    def __call__(self,
+                 hit_effort_: int,
+                 move_effort_: int,
+                 away_effort_: int,
+                 doublehand_effort_: int,
+                 relax_behavior_: int,
+                 relax_rate_: int,
+                 ) -> Tuple[Tuple[float, float, float, float, float, float, float, float, float], int, int, int, int, int, int]:
         return (do_test(self.songs,
-                        self.hit_effort+self.hit_effort_*10**self.magnitude,
-                        self.move_effort+self.move_effort_*10**self.magnitude,
-                        self.away_effort+self.away_effort_*10**self.magnitude,
-                        self.doublehand_effort+self.doublehand_effort_*10**self.magnitude,
-                        self.relax_behavior+self.relax_behavior_*10**self.magnitude,
-                        self.relax_rate+self.relax_rate_*10**self.magnitude,
+                        self.hit_effort+hit_effort_*10**self.magnitude,
+                        self.move_effort+move_effort_*10**self.magnitude,
+                        self.away_effort+away_effort_*10**self.magnitude,
+                        self.doublehand_effort+doublehand_effort_*10**self.magnitude,
+                        self.relax_behavior+relax_behavior_*10**self.magnitude,
+                        self.relax_rate+relax_rate_*10**self.magnitude,
                         ),
-                self.hit_effort_, self.move_effort_, self.away_effort_,
-                self.doublehand_effort_, self.relax_behavior_, self.relax_rate_)
+                hit_effort_, move_effort_, away_effort_,
+                doublehand_effort_, relax_behavior_, relax_rate_)
 
 
 def do_dry_learn(songs: List[RagnaRockDifficultyV1],
@@ -145,54 +172,68 @@ def do_dry_learn(songs: List[RagnaRockDifficultyV1],
                  printing: bool = False,
                  ) -> Tuple[float, float, float, float, float, float, float, float]:
     tests: List[Tuple[Tuple[float, float, float, float, float, float, float, float, float],
-                      float, float, float, float, float, float]] = []
-    for magnitude in range(0, -4, -1):
-        while True:
+                      int, int, int, int, int, int]] = []
+    for magnitude in range(0, -6, -1):
+        hit_effort__: int = 1
+        move_effort__: int = 1
+        away_effort__: int = 1
+        doublehand_effort__: int = 1
+        relax_behavior__: int = 1
+        relax_rate__: int = 1
+        while not (
+            hit_effort__ == 0 and
+            move_effort__ == 0 and
+            away_effort__ == 0 and
+            doublehand_effort__ == 0 and
+            relax_behavior__ == 0 and
+            relax_rate__ == 0
+        ):
+            fpt = ForeignProcessTester(
+                songs,
+                hit_effort,
+                move_effort,
+                away_effort,
+                doublehand_effort,
+                relax_behavior,
+                relax_rate,
+                magnitude,
+            )
             tests = []
-            with ProcessPoolExecutor(cpu_count()) as pe:
-                def callmeback(result: Future):
-                    nonlocal tests
-                    tpl = result.result()
-                    tests.append(tpl)
-                    if printing:
-                        print(f'        {tpl}')
-                for hit_effort_ in range(-1, 2, 1):
-                    for move_effort_ in range(-1, 2, 1):
-                        for away_effort_ in range(-1, 2, 1):
-                            for doublehand_effort_ in range(-1, 2, 1):
-                                for relax_behavior_ in range(-1, 2, 1):
-                                    for relax_rate_ in range(-1, 2, 1):
-                                        fut = pe.submit(ForeignProcessTester(
-                                                        songs,
-                                                        hit_effort,
-                                                        hit_effort_,
-                                                        move_effort,
-                                                        move_effort_,
-                                                        away_effort,
-                                                        away_effort_,
-                                                        doublehand_effort,
-                                                        doublehand_effort_,
-                                                        relax_behavior,
-                                                        relax_behavior_,
-                                                        relax_rate,
-                                                        relax_rate_,
-                                                        magnitude,
-                                                        ))
-                                        fut.add_done_callback(callmeback)
+
+            def callmeback(result: Future):
+                nonlocal tests
+                tpl = result.result()
+                tests.append(tpl)
+                if printing:
+                    print(f'        {tpl}')
+            with ProcessPoolExecutor(cpu_count()*2) as pe:
+                for hit_effort_, move_effort_, away_effort_, doublehand_effort_, relax_behavior_, relax_rate_ in [*nested_range_generator([(1, -2, -1)]*6)[1]]:
+                    pe.submit(
+                        fpt,
+                        hit_effort_,
+                        move_effort_,
+                        away_effort_,
+                        doublehand_effort_,
+                        relax_behavior_,
+                        relax_rate_,
+                    ).add_done_callback(callmeback)
             tests.sort()
             hit_effort__, move_effort__, away_effort__, doublehand_effort__, relax_behavior__, relax_rate__ = (
                 tests[0][1:])
-            hit_effort += round(hit_effort__*10**magnitude, 6)
-            move_effort += round(move_effort__*10**magnitude, 6)
-            away_effort += round(away_effort__*10**magnitude, 6)
-            doublehand_effort += round(doublehand_effort__*10**magnitude, 6)
-            relax_behavior += round(relax_behavior__*10**magnitude, 6)
-            relax_rate += round(relax_rate__*10**magnitude, 6)
+            hit_effort += round(hit_effort__*10**magnitude, 7)
+            move_effort += round(move_effort__*10**magnitude, 7)
+            away_effort += round(away_effort__*10**magnitude, 7)
+            doublehand_effort += round(doublehand_effort__*10**magnitude, 7)
+            relax_behavior += round(relax_behavior__*10**magnitude, 7)
+            relax_rate += round(relax_rate__*10**magnitude, 7)
             if printing:
+                sp1 = f'corr={-tests[0][0][0]} cov={-tests[0][0][1]} abs(varx)={-tests[0][0][2]}'
+                sp2 = f'varx={-tests[0][0][3]} max_err={tests[0][0][4]} avg_err={tests[0][0][5]} min_err={tests[0][0][6]}'
+                sp3 = f'{hit_effort=} {move_effort=} {away_effort=} {doublehand_effort=} {relax_behavior=} {relax_rate=}'
+                sp4 = f'slope={tests[0][0][7]} intercept={tests[0][0][8]}'
+                sps = f'{sp1} {sp2} {sp3} {sp4}'
                 print(
-                    f'    {magnitude=} corr={-tests[0][0][0]} cov={-tests[0][0][1]} abs(varx)={-tests[0][0][2]} varx={-tests[0][0][3]} max_err={tests[0][0][4]} avg_err={tests[0][0][5]} min_err={tests[0][0][6]} {hit_effort=} {move_effort=} {away_effort=} {doublehand_effort=} {relax_behavior=} {relax_rate=} slope={tests[0][0][7]} intercept={tests[0][0][8]}')
-            if hit_effort__ == 0 and move_effort__ == 0 and away_effort__ == 0 and doublehand_effort__ == 0 and relax_rate__ == 0:
-                break
+                    f'    {magnitude=} {sps}')
     tests.sort()
     out = (
         hit_effort,
@@ -205,8 +246,7 @@ def do_dry_learn(songs: List[RagnaRockDifficultyV1],
         tests[0][0][8],
     )
     if printing:
-        print(
-            f'corr={-tests[0][0][0]} cov={-tests[0][0][1]} abs(varx)={-tests[0][0][2]} varx={-tests[0][0][3]} max_err={tests[0][0][4]} avg_err={tests[0][0][5]} min_err={tests[0][0][6]} {hit_effort=} {move_effort=} {away_effort=} {doublehand_effort=} {relax_behavior=} {relax_rate=} slope={tests[0][0][7]} intercept={tests[0][0][8]}')
+        print(sps)
     return out
 
 
@@ -280,8 +320,16 @@ def main():
     songs: List[RagnaRockDifficultyV1] = [song
                                           for songset in songsets
                                           for song in songset.difficultyBeatmapSets]
-    cbk: Callable[[List[RagnaRockInfo], float, float, float, float],
-                  Any] = do_learn if args.learn else (do_dry_learn if args.drylearn else do_test)
+    cbk: Callable[
+        [List[RagnaRockInfo], float, float, float, float, float, float],
+        Any
+    ] = None
+    if args.learn:
+        cbk = do_learn
+    elif args.drylearn:
+        cbk = do_dry_learn
+    else:
+        cbk = do_test
     cbk(
         songs,
         args.hit_effort,
