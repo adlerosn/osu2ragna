@@ -1,6 +1,9 @@
 # osu2ragna
 
-Convert beatmaps from the `Songs` folder from osu! into `CustomLevels` folder of RagnaRock.
+Convert beatmaps from the `Songs` folder from osu!mania into `CustomLevels` folder of RagnaRock.
+
+## Compatibility
+Only `osu!mania 4k` beatmaps.
 
 ## Playability
 Surprisingly good.
